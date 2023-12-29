@@ -6,21 +6,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"gin-fabric-connector/common"
 	"math/big"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt"
 )
 
-var (
-	audience = os.Getenv("AUTH0_AUDIENCE")
-	domain   = os.Getenv("AUTH0_DOMAIN")
-)
-
+// AuthMiddleware defines an Auth0 authentication middleware that will check if the token included in each request is valid
 func AuthMiddleware() gin.HandlerFunc {
+	config := common.GetConfig()
+
 	return func(c *gin.Context) {
 		tokenString := extractTokenFromHeader(c.GetHeader("Authorization"))
 		if tokenString == "" {
@@ -28,7 +26,7 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		token, err := validateToken(tokenString)
+		token, err := validateToken(tokenString, config.Auth0Domain)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 			return
@@ -41,11 +39,11 @@ func AuthMiddleware() gin.HandlerFunc {
 		}
 
 		// Validate audience and issuer
-		if !claims.VerifyAudience(audience, false) {
+		if !claims.VerifyAudience(config.Auth0Audience, false) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid audience"})
 			return
 		}
-		iss := fmt.Sprintf("https://%s/", domain)
+		iss := fmt.Sprintf("https://%s/", config.Auth0Domain)
 		if !claims.VerifyIssuer(iss, false) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid issuer"})
 			return
@@ -63,8 +61,8 @@ func extractTokenFromHeader(authorizationHeader string) string {
 	return parts[1]
 }
 
-func validateToken(tokenString string) (*jwt.Token, error) {
-	key, err := getPublicKey()
+func validateToken(tokenString, domain string) (*jwt.Token, error) {
+	key, err := getPublicKey(domain)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +72,7 @@ func validateToken(tokenString string) (*jwt.Token, error) {
 	})
 }
 
-func getPublicKey() (*rsa.PublicKey, error) {
+func getPublicKey(domain string) (*rsa.PublicKey, error) {
 	jwksURL := fmt.Sprintf("https://%s/.well-known/jwks.json", domain)
 	resp, err := http.Get(jwksURL)
 	if err != nil {
